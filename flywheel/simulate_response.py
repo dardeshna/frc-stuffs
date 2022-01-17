@@ -1,5 +1,6 @@
 import sys
 import os
+from textwrap import wrap
 sys.path.insert(1, os.path.realpath(os.path.pardir))
 
 import copy
@@ -22,7 +23,10 @@ I_free = 1.8 # A
 n_motors = 1
 
 G_ratio = 1
-J_flywheel = 3.6e-4 # kg*m^2
+r_flywheel = 0.076 # m
+m_flywheel = 0.23 # kg
+n_flywheel = 2
+J_flywheel = 1/2 * m_flywheel * r_flywheel**2 * n_flywheel # kg*m^2, solid disk
 
 motor = Motor(V_nominal, w_free, T_stall, I_stall, I_free, n_motors)
 flywheel = Flywheel(motor, G_ratio, J_flywheel)
@@ -30,19 +34,20 @@ encoder = Encoder(G=G_ratio, dt=SIM_DT)
 base_talon = Talon(encoder, dt=SIM_DT)
 ticks_per_rev, ticks_per_100ms_per_rev_per_second = encoder.get_conversions()
 
-print(ticks_per_100ms_per_rev_per_second)
-
 # PID Gains
-base_talon.P = 0
+base_talon.P = 0.05
 base_talon.I = 0
 base_talon.D = 0
 base_talon.F = 1023 / (w_free / G_ratio * ticks_per_100ms_per_rev_per_second)
 base_talon.izone = 0
 
+# LQR gains
+
 def sim_offboard(sim_ts, x_0, w_goal, tau_ext):
 
     sim = Sim(flywheel, x_0)
     talon = copy.deepcopy(base_talon)
+    talon.encoder.set_initial_rate(x_0[1] * ticks_per_100ms_per_rev_per_second)
     talon.set(TalonControlMode.Velocity, w_goal * ticks_per_100ms_per_rev_per_second)
 
     # run simulation
@@ -91,10 +96,67 @@ def sim_spinup(sim_func, t, w_goal):
 
     return sim
 
+def sim_shoot(sim_func, t, w_goal):
+
+    tau_dist, steps_dist = calc_ball_ext_torque(w_goal)
+
+    idx_start = int(0.2*t / SIM_DT)
+    idx_end = idx_start + steps_dist
+
+    t = idx_end * SIM_DT if idx_end * SIM_DT > t else t
+
+    sim_ts = np.arange(int(t/SIM_DT)) * SIM_DT
+    tau_ext = np.zeros_like(sim_ts)
+    tau_ext[idx_start:idx_end] = tau_dist
+    
+    sim = sim_func(sim_ts, np.array([0, w_goal]), w_goal, tau_ext)
+
+    return sim
+
+# Ball disturbance
+
+m_ball = 0.27
+r_ball = 0.12
+J_ball = 2/3 * m_ball * r_ball ** 2 # kg*m^2, thin spherical shell
+wrap_angle = np.pi / 4
+
+def calc_ball_ext_torque(w_flywheel):
+
+    v_ball = 1/2 * w_flywheel * r_flywheel
+
+    K_trans = 1/2 * m_ball * v_ball ** 2
+    K_rot = 1/2 * J_ball * (v_ball / r_ball) ** 2
+    K = K_trans + K_rot
+
+    w_flywheel_final = np.sqrt(w_flywheel ** 2 - 2 / J_flywheel * K)
+
+    print(w_flywheel * 60 / (2 * np.pi))
+    print(w_flywheel_final * 60 / (2 * np.pi))
+
+    t = wrap_angle / ((w_flywheel + w_flywheel_final) / 2)
+    steps = int(t / SIM_DT)
+    
+    tau_ext = K / (wrap_angle * steps * SIM_DT / t)
+
+    print("actual disturbance: ", t, K/wrap_angle)
+    print("adjusted disturbance: ", steps * SIM_DT, tau_ext)
+
+    return tau_ext, steps
 
 if __name__ == "__main__":
 
-    sim = sim_spinup(sim_offboard, 5, w_free/2)
+    w_goal = w_free / 2
+
+    print("flywheel inertia:", J_flywheel)
+    print("flywheel energy:", 1/2 * J_flywheel * w_goal**2)
+
+    tau_ext, t = calc_ball_ext_torque(w_goal)
+    print("ball inertia:", J_ball)
+    print("ball energy: ",  tau_ext * wrap_angle)
+
+    print("accel time: ", t)
+
+    sim = sim_shoot(sim_offboard, 5, w_goal)
     xs, us, ts = sim.get_result()
 
     plt.plot(ts, xs[:,1] * 60 / (2*np.pi))
