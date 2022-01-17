@@ -4,6 +4,8 @@ sys.path.insert(1, os.path.realpath(os.path.pardir))
 
 import copy
 import numpy as np
+import scipy.signal
+import scipy.linalg
 from matplotlib import pyplot as plt
 
 from flywheel import Flywheel
@@ -29,26 +31,26 @@ J_flywheel = 1/2 * m_flywheel * r_flywheel**2 * n_flywheel # kg*m^2, solid disk
 
 motor = Motor(V_nominal, w_free, T_stall, I_stall, I_free, n_motors)
 flywheel = Flywheel(motor, G_ratio, J_flywheel)
-encoder = Encoder(G=G_ratio, dt=SIM_DT)
+encoder = Encoder(G=G_ratio, measurement_window=100, rolling_avg_period=64, dt=SIM_DT)
 base_talon = Talon(encoder, dt=SIM_DT)
 ticks_per_rev, ticks_per_100ms_per_rev_per_second = encoder.get_conversions()
 
-# Current limits
+# Current limits (limit current (A), trigger current (A), trigger threshold time (s))
 base_talon.stator_limit_config = (10, 20, 0)
-base_talon.stator_limit_enable = False
+base_talon.stator_limit_enable = True
 base_talon.supply_limit_config = (np.inf, np.inf, 0)
 base_talon.supply_limit_enable = False
 
 # PID Gains
-base_talon.P = 0.1
+base_talon.P = 0.2
 base_talon.I = 0
 base_talon.D = 0
 base_talon.F = 1023 / (w_free / G_ratio * ticks_per_100ms_per_rev_per_second)
 base_talon.izone = 0
 
-# LQR gains
-
 def sim_offboard(sim_ts, x_0, w_goal, tau_ext):
+    """Simulates velocity control loop on the motor controller
+    """
 
     sim = Sim(flywheel, x_0)
     talon = copy.deepcopy(base_talon)
@@ -66,34 +68,68 @@ def sim_offboard(sim_ts, x_0, w_goal, tau_ext):
 
     return sim
 
+# LQR Gains
 
-# def sim_onboard(sim_ts, x_0, w_goal, tau_ext):
+K_ff = 12 / (w_free / G_ratio)
 
-#     sim = Sim(flywheel, x_0)
-#     talon = copy.deepcopy(base_talon)
+A_d, B_d, C_d, _, _ = scipy.signal.cont2discrete((np.atleast_2d(flywheel.A[1,1]), np.atleast_2d(flywheel.B[1,0]), np.atleast_2d(1), np.atleast_2d(0)), CTRL_DT)
+Q_fb = 1
+R_fb = 100
 
-#     ctrl_ts = np.arange(int(t/CTRL_DT)) * CTRL_DT
+# https://en.wikipedia.org/wiki/Linear%E2%80%93quadratic_regulator#Infinite-horizon,_discrete-time_LQR
+P_fb = scipy.linalg.solve_discrete_are(A_d, B_d, Q_fb, R_fb)
+K_fb = np.linalg.solve(R_fb + B_d.T @ P_fb @ B_d, B_d.T @ P_fb @ A_d)
 
-#     update_ctrl = np.zeros_like(sim_ts, dtype=bool)
-#     update_ctrl[np.searchsorted(sim_ts, ctrl_ts)] = True
+Q_k = 1
+R_k = 0.01
 
-#     j = 0
+P_k = scipy.linalg.solve_discrete_are(A_d.T, C_d.T, Q_k, R_k)
+K_k = np.linalg.solve(R_k + C_d @ P_k @ C_d.T, C_d @ P_k).T # TODO : should it be multiplied by A_d.T ???
 
-#     # run simulation
-#     for i, t in enumerate(sim_ts):
+print("feedback gain (K_fb): ", K_fb)
+print("kalman gain (K_k): ", K_k)
 
-#         if update_ctrl[i]:
-#             w = talon.encoder.sensor_rate / ticks_per_100ms_per_rev_per_second
-#             talon.set(TalonControlMode.PercentOutput, 0)
-#             j += 1
+def sim_onboard(sim_ts, x_0, w_goal, tau_ext):
+    """Simulates velocity feedback control on the rio
+    """
 
-#         talon.update()
-#         V = talon.get_motor_output_voltage()
-#         sim.step((V, tau_ext[i]), SIM_DT)
-#         talon.pushReading(sim.xs[-1][0] * ticks_per_rev)
+    sim = Sim(flywheel, x_0)
+    talon = copy.deepcopy(base_talon)
+    talon.encoder.set_rate(x_0[1] * ticks_per_100ms_per_rev_per_second)
+    talon.set(TalonControlMode.Velocity, w_goal * ticks_per_100ms_per_rev_per_second)
 
+    w_hat = x_0[1]
+
+    ctrl_ts = np.arange(int(sim_ts[-1]/CTRL_DT)) * CTRL_DT
+
+    update_ctrl = np.zeros_like(sim_ts, dtype=bool)
+    update_ctrl[np.searchsorted(sim_ts, ctrl_ts)] = True
+
+    # run simulation
+    for i, t in enumerate(sim_ts):
+
+        if update_ctrl[i]:
+
+            y = talon.encoder.sensor_rate / ticks_per_100ms_per_rev_per_second
+            w_hat += K_k * (y - w_hat) # observer update step
+            percent_out = (K_fb * (w_goal - w_hat) + K_ff * w_goal) / 12.0
+
+            talon.set(TalonControlMode.PercentOutput, percent_out)
+
+        talon.update()
+        V = talon.get_motor_output_voltage()
+        sim.step((V, tau_ext[i]), SIM_DT)
+        talon.encoder.push_reading(sim.xs[-1][0] * ticks_per_rev)
+        talon.current = np.abs(motor.get_I(V, sim.xs[-1][1]))
+
+        if update_ctrl[i]:
+            w_hat = A_d @ w_hat + B_d @ np.atleast_1d(V) # observer predict step
+    
+    return sim
 
 def sim_spinup(sim_func, t, w_goal):
+    """Simulates spinning up a shooter
+    """
 
     sim_ts = np.arange(int(t/SIM_DT)) * SIM_DT
     tau_ext = np.zeros_like(sim_ts)
@@ -103,8 +139,18 @@ def sim_spinup(sim_func, t, w_goal):
     return sim
 
 def sim_shoot(sim_func, t, w_goal):
+    """Simulates firing a ball
+    """
+
+    # print("flywheel inertia:", J_flywheel)
+    # print("flywheel energy:", 1/2 * J_flywheel * w_goal**2)
 
     tau_dist, steps_dist = calc_ball_ext_torque(w_goal)
+
+    # print("ball inertia:", J_ball)
+    # print("ball energy: ",  tau_dist * wrap_angle)
+
+    # print("accel time: ", steps_dist * SIM_DT)
 
     idx_start = int(0.2*t / SIM_DT)
     idx_end = idx_start + steps_dist
@@ -127,26 +173,30 @@ J_ball = 2/3 * m_ball * r_ball ** 2 # kg*m^2, thin spherical shell
 wrap_angle = np.pi / 4 # rad
 
 def calc_ball_ext_torque(w_flywheel):
+    """Calculate external torque applied to flywheel by ball over a certain number of simulation steps
 
-    v_ball = 1/2 * w_flywheel * r_flywheel
+    Assumes hooded shooter with v_ball = 1/2 * r_flywheel * w_flywheel
+    """
+
+    v_ball = 1/2 * r_flywheel * w_flywheel
     dir = np.sign(w_flywheel)
 
     K_trans = 1/2 * m_ball * v_ball ** 2
     K_rot = 1/2 * J_ball * (v_ball / r_ball) ** 2
     K = K_trans + K_rot
 
-    w_flywheel_final = dir * np.sqrt(w_flywheel ** 2 - 2 / J_flywheel * K)
+    w_flywheel_final = dir * np.sqrt(w_flywheel ** 2 - 2 / J_flywheel * K) # 1/2*J*w_f^2 = 1/2*J*w_0^2 - K
 
-    print("initial speed:", w_flywheel * 60 / (2 * np.pi))
-    print("final speed:", w_flywheel_final * 60 / (2 * np.pi))
+    # print("initial speed:", w_flywheel * 60 / (2 * np.pi))
+    # print("final speed:", w_flywheel_final * 60 / (2 * np.pi))
 
     t = np.abs(wrap_angle / ((w_flywheel + w_flywheel_final) / 2))
     steps = int(t / SIM_DT)
     
     tau_ext = dir * K / (wrap_angle * steps * SIM_DT / t)
 
-    print("actual disturbance: ", t, K/wrap_angle)
-    print("adjusted disturbance: ", steps * SIM_DT, tau_ext)
+    # print("actual disturbance: ", t, K/wrap_angle)
+    # print("adjusted disturbance: ", steps * SIM_DT, tau_ext)
 
     return tau_ext, steps
 
@@ -154,25 +204,27 @@ if __name__ == "__main__":
     
     w_goal = w_free / 2
 
-    print("flywheel inertia:", J_flywheel)
-    print("flywheel energy:", 1/2 * J_flywheel * w_goal**2)
-
-    tau_ext, t = calc_ball_ext_torque(w_goal)
-    print("ball inertia:", J_ball)
-    print("ball energy: ",  tau_ext * wrap_angle)
-
-    print("accel time: ", t * SIM_DT)
-
-    sim = sim_shoot(sim_offboard, 5, w_goal)
+    sim = sim_shoot(sim_onboard, 5, w_goal)
     xs, us, ts = sim.get_result()
 
-    plt.figure()
-    plt.plot(ts, xs[:,1] * 60 / (2*np.pi))
+    plt.figure(figsize=(6, 8))
 
-    plt.figure()
+    plt.subplot(3, 1, 1)
+    plt.plot((ts[0], ts[-1]), (w_goal * 60 / (2*np.pi), w_goal * 60 / (2*np.pi)))
+    plt.plot(ts, xs[:,1] * 60 / (2*np.pi))
+    plt.legend(('setpoint', 'actual'))
+    plt.ylabel('flywheel speed (rpm)')
+
+    plt.subplot(3, 1, 2)
     plt.plot(ts, us[:, 0])
+    plt.legend(('motor voltage',))
+    plt.ylabel('voltage (V)')
+
+    plt.subplot(3, 1, 3)
     plt.plot(ts[1:], motor.get_I(us[:-1, 0], xs[1:, 1]))
     plt.plot(ts[1:], motor.get_I(us[:-1, 0], xs[1:, 1])*us[:-1, 0]/12)
+    plt.legend(('motor current', 'supply current'))
+    plt.xlabel('time (s)')
+    plt.ylabel('current (A)')
 
     plt.show()
-

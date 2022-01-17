@@ -44,7 +44,8 @@ class Talon():
 
         self.input_voltage = 12.0
 
-        self.supply_limit_config = (np.inf, np.inf, 0) # limit, trigger, trigger threshold time
+        # limit current, trigger current, trigger threshold time
+        self.supply_limit_config = (np.inf, np.inf, 0) 
         self.supply_limit_enable = False
         self.stator_limit_config = (np.inf, np.inf, 0) # limit, trigger, trigger threshold time
         self.stator_limit_enable = False
@@ -63,7 +64,7 @@ class Talon():
     @current.setter
     def current(self, value):
         self.motor_current = value
-        self.input_current = self.get_motor_output_percent() * value
+        self.input_current = np.abs(self.get_motor_output_percent()) * value
     
     def set(self, mode, setpoint):
 
