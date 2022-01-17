@@ -16,11 +16,12 @@ CTRL_DT = 0.02
 
 # motor and system constants
 
+# falcon 500
 V_nominal = 12 # V
-w_free =  5676 * (2 * np.pi / 60) # RPM -> rad/s
-T_stall = 2.6 # Nm
-I_stall = 105 # A
-I_free = 1.8 # A
+w_free =  6380 * (2 * np.pi / 60) # RPM -> rad/s
+T_stall = 4.69 # Nm
+I_stall = 257 # A
+I_free = 1.5 # A
 n_motors = 1
 
 G_ratio = 1
@@ -36,13 +37,13 @@ base_talon = Talon(encoder, dt=SIM_DT)
 ticks_per_rev, ticks_per_100ms_per_rev_per_second = encoder.get_conversions()
 
 # Current limits (limit current (A), trigger current (A), trigger threshold time (s))
-base_talon.stator_limit_config = (10, 20, 0)
+base_talon.stator_limit_config = (20, 30, 0)
 base_talon.stator_limit_enable = True
 base_talon.supply_limit_config = (np.inf, np.inf, 0)
 base_talon.supply_limit_enable = False
 
 # PID Gains
-base_talon.P = 0.2
+base_talon.P = 0.05
 base_talon.I = 0
 base_talon.D = 0
 base_talon.F = 1023 / (w_free / G_ratio * ticks_per_100ms_per_rev_per_second)
@@ -74,7 +75,7 @@ K_ff = 12 / (w_free / G_ratio)
 
 A_d, B_d, C_d, _, _ = scipy.signal.cont2discrete((np.atleast_2d(flywheel.A[1,1]), np.atleast_2d(flywheel.B[1,0]), np.atleast_2d(1), np.atleast_2d(0)), CTRL_DT)
 Q_fb = 1
-R_fb = 100
+R_fb = 2000
 
 # https://en.wikipedia.org/wiki/Linear%E2%80%93quadratic_regulator#Infinite-horizon,_discrete-time_LQR
 P_fb = scipy.linalg.solve_discrete_are(A_d, B_d, Q_fb, R_fb)
@@ -212,7 +213,7 @@ if __name__ == "__main__":
     
     w_goal = w_free / 2
 
-    sim = sim_shoot(sim_onboard, 5, w_goal, shooter_type='single')
+    sim = sim_shoot(sim_onboard, 5, w_goal, shooter_type='double')
     xs, us, ts = sim.get_result()
 
     plt.figure(figsize=(6, 8))
