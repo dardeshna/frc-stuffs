@@ -22,11 +22,12 @@ class Flywheel(System):
     equations of motion:
 
     x_dot = w
-    w_dot = -(G ** 2) * k_t / (1 / k_b * R * J) * w  +  G * k_t / (R * J) * V  -  tau_ext / J
+    w_dot = - (G ** 2) / J * (k_t * k_b / R + k_F) * w  +  G / J * k_t / R * V  -  tau_ext / J
 
     R = motor resistance (multiple motors combine in parallel)
     k_t = motor torque constant
     k_b = motor back-emf constant
+    k_F = motor viscous friction constant
     G = gear ratio
     J = flywheel moment of inertia
     """
@@ -38,11 +39,11 @@ class Flywheel(System):
         
         self.A = np.array([
             [0, 1],
-            [0, -(G ** 2) * motor.k_t / (1 / motor.k_b * motor.R * J)]
+            [0, - (G ** 2) / J * (motor.k_t * motor.k_b / motor.R + motor.k_F)]
         ])
         self.B = np.array([
             [0, 0],
-            [G * motor.k_t / (motor.R * J), -1 / J],
+            [G / J * motor.k_t / motor.R, -1 / J],
         ])
 
     def f(self, x, u):

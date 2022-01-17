@@ -38,10 +38,15 @@ class Encoder():
         
         self.prev_sensor_rate = self.sensor_rate
         self.sensor_rate = avg * (100 / self.measurement_window) * (0.001 / self.dt)
-        print(self.sensor_rate)
     
     def zero_sensor(self):
         self.sensor_readings = self.sensor_readings - self.sensor_readings[0]
+
+    def set_initial_rate(self, sensor_rate):
+
+        self.sensor_rate = sensor_rate
+        self.prev_sensor_rate = sensor_rate
+        self.sensor_readings = self.sensor_readings[0] - np.arange(len(self.sensor_readings)) * self.sensor_rate / 100 * (self.dt / 0.001)
 
     def reset(self):
 
