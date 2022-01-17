@@ -8,7 +8,7 @@ class Encoder():
     Velocity averaging with adjustable measurement window and sampling period
     """
 
-    def __init__(self, cpr=4096, measurement_window=100, rolling_avg_period=64, dt=0.001, G=1, r=1):
+    def __init__(self, cpr=2048, measurement_window=100, rolling_avg_period=64, dt=0.001, G=1, r=1):
 
         self.cpr = cpr
         self.measurement_window = measurement_window
@@ -39,11 +39,14 @@ class Encoder():
         self.prev_sensor_rate = self.sensor_rate
         self.sensor_rate = avg * (100 / self.measurement_window) * (0.001 / self.dt)
     
-    def zero_sensor(self):
+    def zero_reading(self):
         self.sensor_readings = self.sensor_readings - self.sensor_readings[0]
 
-    def set_initial_rate(self, sensor_rate):
+    def set_reading(self, reading):
+        self.zero_reading()
+        self.sensor_readings = self.sensor_readings + reading
 
+    def set_rate(self, sensor_rate):
         self.sensor_rate = sensor_rate
         self.prev_sensor_rate = sensor_rate
         self.sensor_readings = self.sensor_readings[0] - np.arange(len(self.sensor_readings)) * self.sensor_rate / 100 * (self.dt / 0.001)

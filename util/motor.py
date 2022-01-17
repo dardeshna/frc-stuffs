@@ -32,3 +32,7 @@ class Motor():
         self.k_b = (self.V_n - self.R * self.I_f) / self.w_f
         self.k_t = self.T_s / self.I_s
         self.k_F = self.k_t * self.I_f / self.w_f
+
+    def get_I(self, V, w):
+
+        return (V - self.k_b * w) / self.R
