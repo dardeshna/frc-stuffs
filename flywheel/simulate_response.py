@@ -138,14 +138,14 @@ def sim_spinup(sim_func, t, w_goal):
 
     return sim
 
-def sim_shoot(sim_func, t, w_goal):
+def sim_shoot(sim_func, t, w_goal, shooter_type='single'):
     """Simulates firing a ball
     """
 
     # print("flywheel inertia:", J_flywheel)
     # print("flywheel energy:", 1/2 * J_flywheel * w_goal**2)
 
-    tau_dist, steps_dist = calc_ball_ext_torque(w_goal)
+    tau_dist, steps_dist = calc_ball_ext_torque(w_goal, shooter_type)
 
     # print("ball inertia:", J_ball)
     # print("ball energy: ",  tau_dist * wrap_angle)
@@ -172,23 +172,31 @@ r_ball = 0.12 # m
 J_ball = 2/3 * m_ball * r_ball ** 2 # kg*m^2, thin spherical shell
 wrap_angle = np.pi / 4 # rad
 
-def calc_ball_ext_torque(w_flywheel):
+def calc_ball_ext_torque(w_flywheel, shooter_type='single'):
     """Calculate external torque applied to flywheel by ball over a certain number of simulation steps
 
-    Assumes hooded shooter with v_ball = 1/2 * r_flywheel * w_flywheel
+    shooter_type=single: Assumes hooded shooter with v_ball = 1/2 * r_flywheel * w_flywheel
+    shooter_type=double: Assumes v_ball = r_flywheel * w_flywheel where only 1/2 of ball energy is lost by each flywheel
     """
 
-    v_ball = 1/2 * r_flywheel * w_flywheel
+    if shooter_type == 'single':
+        v_ball = 1/2 * r_flywheel * w_flywheel
+    elif shooter_type == 'double':
+        v_ball = r_flywheel * w_flywheel
+    
     dir = np.sign(w_flywheel)
 
-    K_trans = 1/2 * m_ball * v_ball ** 2
-    K_rot = 1/2 * J_ball * (v_ball / r_ball) ** 2
-    K = K_trans + K_rot
+    if shooter_type == 'single':
+        K_trans = 1/2 * m_ball * v_ball ** 2
+        K_rot = 1/2 * J_ball * (v_ball / r_ball) ** 2
+        K = K_trans + K_rot
+    elif shooter_type == 'double':
+        K = 1/2 * (1/2 * m_ball * v_ball ** 2)
 
     w_flywheel_final = dir * np.sqrt(w_flywheel ** 2 - 2 / J_flywheel * K) # 1/2*J*w_f^2 = 1/2*J*w_0^2 - K
 
-    # print("initial speed:", w_flywheel * 60 / (2 * np.pi))
-    # print("final speed:", w_flywheel_final * 60 / (2 * np.pi))
+    print("initial speed:", w_flywheel * 60 / (2 * np.pi))
+    print("final speed:", w_flywheel_final * 60 / (2 * np.pi))
 
     t = np.abs(wrap_angle / ((w_flywheel + w_flywheel_final) / 2))
     steps = int(t / SIM_DT)
@@ -204,7 +212,7 @@ if __name__ == "__main__":
     
     w_goal = w_free / 2
 
-    sim = sim_shoot(sim_onboard, 5, w_goal)
+    sim = sim_shoot(sim_onboard, 5, w_goal, shooter_type='single')
     xs, us, ts = sim.get_result()
 
     plt.figure(figsize=(6, 8))
