@@ -11,8 +11,8 @@ from matplotlib import pyplot as plt
 from flywheel import Flywheel
 from util import Motor, Encoder, Talon, TalonControlMode, Sim
 
-SIM_DT = 0.001
-CTRL_DT = 0.02
+SIM_DT = 0.001 # simulation and motor controller
+CTRL_DT = 0.02 # main robot controller (roboRIO)
 
 # motor and system constants
 
@@ -50,7 +50,7 @@ base_talon.F = 1023 / (w_free / G_ratio * ticks_per_100ms_per_rev_per_second)
 base_talon.izone = 0
 
 def sim_offboard(sim_ts, x_0, w_goal, tau_ext):
-    """Simulates velocity control loop on the motor controller
+    """Simulates velocity PIDF control loop on the motor controller
     """
 
     sim = Sim(flywheel, x_0)
@@ -71,12 +71,13 @@ def sim_offboard(sim_ts, x_0, w_goal, tau_ext):
 
 # LQR Gains
 
-K_ff = 12 / (w_free / G_ratio)
+K_ff = 12 / (w_free / G_ratio) # feedforward gain
 
 A_d, B_d, C_d, _, _ = scipy.signal.cont2discrete((np.atleast_2d(flywheel.A[1,1]), np.atleast_2d(flywheel.B[1,0]), np.atleast_2d(1), np.atleast_2d(0)), CTRL_DT)
 Q_fb = 1
 R_fb = 2000
 
+# Solve discrete algebriac ricatti eq (DARE) to obtain feedback gain K_fb
 # https://en.wikipedia.org/wiki/Linear%E2%80%93quadratic_regulator#Infinite-horizon,_discrete-time_LQR
 P_fb = scipy.linalg.solve_discrete_are(A_d, B_d, Q_fb, R_fb)
 K_fb = np.linalg.solve(R_fb + B_d.T @ P_fb @ B_d, B_d.T @ P_fb @ A_d)
@@ -84,6 +85,7 @@ K_fb = np.linalg.solve(R_fb + B_d.T @ P_fb @ B_d, B_d.T @ P_fb @ A_d)
 Q_k = 1
 R_k = 0.01
 
+# Solve DARE for dual system to obtain steady-state kalman gain K_k
 P_k = scipy.linalg.solve_discrete_are(A_d.T, C_d.T, Q_k, R_k)
 K_k = np.linalg.solve(R_k + C_d @ P_k @ C_d.T, C_d @ P_k).T # TODO : should it be multiplied by A_d.T ???
 
@@ -91,7 +93,7 @@ print("feedback gain (K_fb): ", K_fb)
 print("kalman gain (K_k): ", K_k)
 
 def sim_onboard(sim_ts, x_0, w_goal, tau_ext):
-    """Simulates velocity feedback control on the rio
+    """Simulates velocity feedback control w/ kalman observer on the roboRIO
     """
 
     sim = Sim(flywheel, x_0)
@@ -111,9 +113,9 @@ def sim_onboard(sim_ts, x_0, w_goal, tau_ext):
 
         if update_ctrl[i]:
 
-            y = talon.encoder.sensor_rate / ticks_per_100ms_per_rev_per_second
+            y = talon.encoder.sensor_rate / ticks_per_100ms_per_rev_per_second # read measurement
             w_hat += K_k * (y - w_hat) # observer update step
-            percent_out = (K_fb * (w_goal - w_hat) + K_ff * w_goal) / 12.0
+            percent_out = (K_fb * (w_goal - w_hat) + K_ff * w_goal) / 12.0 # compute control
 
             talon.set(TalonControlMode.PercentOutput, percent_out)
 
@@ -167,6 +169,8 @@ def sim_shoot(sim_func, t, w_goal, shooter_type='single'):
     return sim
 
 # Ball disturbance
+# assumes the ball is accelerated linearly over the entrire wrap of the hood
+# note: wrap is not very well defined, especially for double flywheels, but it doesn't have a significant impact under these assumptions
 
 m_ball = 0.27 # kg
 r_ball = 0.12 # m
@@ -176,8 +180,8 @@ wrap_angle = np.pi / 4 # rad
 def calc_ball_ext_torque(w_flywheel, shooter_type='single'):
     """Calculate external torque applied to flywheel by ball over a certain number of simulation steps
 
-    shooter_type=single: Assumes hooded shooter with v_ball = 1/2 * r_flywheel * w_flywheel
-    shooter_type=double: Assumes v_ball = r_flywheel * w_flywheel where only 1/2 of ball energy is lost by each flywheel
+    shooter_type=single: hooded shooter with v_ball = 1/2 * r_flywheel * w_flywheel
+    shooter_type=double: double flywheel with v_ball = r_flywheel * w_flywheel where each flywheel contributes half of ball energy
     """
 
     if shooter_type == 'single':
@@ -192,7 +196,7 @@ def calc_ball_ext_torque(w_flywheel, shooter_type='single'):
         K_rot = 1/2 * J_ball * (v_ball / r_ball) ** 2
         K = K_trans + K_rot
     elif shooter_type == 'double':
-        K = 1/2 * (1/2 * m_ball * v_ball ** 2)
+        K = 1/2 * (1/2 * m_ball * v_ball ** 2) # half of ball energy
 
     w_flywheel_final = dir * np.sqrt(w_flywheel ** 2 - 2 / J_flywheel * K) # 1/2*J*w_f^2 = 1/2*J*w_0^2 - K
 
@@ -211,24 +215,33 @@ def calc_ball_ext_torque(w_flywheel, shooter_type='single'):
 
 if __name__ == "__main__":
     
+    # simulation duration
+    t_sim = 5
+
+    # flywheel setpoint
     w_goal = w_free / 2
 
-    sim = sim_shoot(sim_onboard, 5, w_goal, shooter_type='double')
+    # construct desired simulation type
+    # sim = sim_spinup(sim_onboard, t_sim, w_goal)
+    sim = sim_shoot(sim_onboard, t_sim, w_goal, shooter_type='double')
     xs, us, ts = sim.get_result()
 
     plt.figure(figsize=(6, 8))
 
+    # plot flywheel speed
     plt.subplot(3, 1, 1)
     plt.plot((ts[0], ts[-1]), (w_goal * 60 / (2*np.pi), w_goal * 60 / (2*np.pi)))
     plt.plot(ts, xs[:,1] * 60 / (2*np.pi))
     plt.legend(('setpoint', 'actual'))
     plt.ylabel('flywheel speed (rpm)')
 
+    # plot motor voltage
     plt.subplot(3, 1, 2)
     plt.plot(ts, us[:, 0])
     plt.legend(('motor voltage',))
     plt.ylabel('voltage (V)')
 
+    # plot currents
     plt.subplot(3, 1, 3)
     plt.plot(ts[1:], motor.get_I(us[:-1, 0], xs[1:, 1]))
     plt.plot(ts[1:], motor.get_I(us[:-1, 0], xs[1:, 1])*us[:-1, 0]/12)
