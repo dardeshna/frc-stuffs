@@ -106,7 +106,6 @@ class Talon():
                     self.supply_limit_counter = 0
                 if self.supply_limit_counter > int(self.supply_limit_config[2]/self.dt):
                     self.supply_limiting = True
-                    
                     self.supply_limit_counter = 0
         
         # TODO: replace ramp rate kludge with PID current control
