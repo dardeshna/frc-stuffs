@@ -65,7 +65,7 @@ def sim_offboard(sim_ts, x_0, w_goal, tau_ext):
         V = talon.get_motor_output_voltage()
         sim.step((V, tau_ext[i]), SIM_DT)
         talon.encoder.push_reading(sim.xs[-1][0] * ticks_per_rev)
-        talon.current = np.abs(motor.get_I(V, sim.xs[-1][1]))
+        talon.current = np.abs(motor.get_I(V, sim.xs[-1][1] * G_ratio))
 
     return sim
 
@@ -123,7 +123,7 @@ def sim_onboard(sim_ts, x_0, w_goal, tau_ext):
         V = talon.get_motor_output_voltage()
         sim.step((V, tau_ext[i]), SIM_DT)
         talon.encoder.push_reading(sim.xs[-1][0] * ticks_per_rev)
-        talon.current = np.abs(motor.get_I(V, sim.xs[-1][1]))
+        talon.current = np.abs(motor.get_I(V, sim.xs[-1][1] * G_ratio))
 
         if update_ctrl[i]:
             w_hat = A_d @ w_hat + B_d @ np.atleast_1d(V) # observer predict step
