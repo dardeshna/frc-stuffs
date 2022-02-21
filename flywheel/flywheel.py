@@ -32,8 +32,8 @@ class Flywheel(System):
     J = flywheel moment of inertia
     """
     
-    n = 2
-    m = 2
+    n_states = 2
+    m_inputs = 2
 
     def __init__(self, motor, G, J):
         
@@ -46,6 +46,6 @@ class Flywheel(System):
             [G / J * motor.k_t / motor.R, -1 / J],
         ])
 
-    def f(self, x, u):
+    def f(self, x, u, t):
 
         return self.A @ x + self.B @ u

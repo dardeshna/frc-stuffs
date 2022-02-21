@@ -4,12 +4,12 @@ class System(ABC):
 
     @property
     @abstractmethod
-    def n(self):
+    def n_states(self):
         pass
 
     @property
     @abstractmethod
-    def m(self):
+    def m_inputs(self):
         pass
 
     @abstractmethod
