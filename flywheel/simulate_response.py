@@ -219,7 +219,7 @@ if __name__ == "__main__":
     t_sim = 5
 
     # flywheel setpoint
-    w_goal = w_free / 2
+    w_goal = w_free / G_ratio / 2
 
     # construct desired simulation type
     # sim = sim_spinup(sim_onboard, t_sim, w_goal)
@@ -243,8 +243,8 @@ if __name__ == "__main__":
 
     # plot currents
     plt.subplot(3, 1, 3)
-    plt.plot(ts[1:], motor.get_I(us[:-1, 0], xs[1:, 1]))
-    plt.plot(ts[1:], motor.get_I(us[:-1, 0], xs[1:, 1])*us[:-1, 0]/12)
+    plt.plot(ts[1:], motor.get_I(us[:-1, 0], xs[1:, 1] * G_ratio))
+    plt.plot(ts[1:], motor.get_I(us[:-1, 0], xs[1:, 1] * G_ratio) * us[:-1, 0]/12)
     plt.legend(('motor current', 'supply current'))
     plt.xlabel('time (s)')
     plt.ylabel('current (A)')
