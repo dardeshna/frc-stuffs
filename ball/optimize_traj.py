@@ -12,13 +12,13 @@ from ball_util import *
 
 from util import Sim
 
-m = 0.26932025 # ball mass (kg)
-d = 0.2413 # ball diameter (m)
+m_ball = 0.26932025 # ball mass (kg)
+d_ball = 0.2413 # ball diameter (m)
 
-ball = Ball(m, d)
+ball = Ball(m_ball, d_ball)
 
 # initial and final positions (ft -> m)
-x_i = np.array([-10, 3]) / METERS_TO_FEET
+x_i = np.array([-10, 2.5]) / METERS_TO_FEET
 x_f = np.array([0, 8.67]) / METERS_TO_FEET
 
 # min and max initial angles (deg)
@@ -26,8 +26,8 @@ theta_0_min = np.deg2rad(50)
 theta_0_max = np.deg2rad(90)
 
 # maximum motor and ball velocities
-w_motor_max = 5676 * 2 * np.pi / 60 # (rpm -> rad/s)
-G = 2
+w_motor_max = 6380 * 2 * np.pi / 60 # (rpm -> rad/s)
+G = 9/4
 d_wheel = 4 / 12 / METERS_TO_FEET
 v_tangential_max = w_motor_max / G * (d_wheel / 2)
 
@@ -39,15 +39,6 @@ n = 101
 
 # naive straight line trajectory initialization
 x_0 = np.append(np.r_[np.linspace(x_i, x_f, n).T, np.ones((2, n))].ravel(), [0,1])
-
-# helper function to unpack flattened trajectory
-def unpack(x):
-
-    t = x[-1]
-    w = x[-2]
-    x,y,v_x,v_y = x[:-2].reshape((4, -1))
-
-    return x, y, v_x, v_y, w, t
 
 # objective function
 def f(x_mat):
@@ -83,7 +74,7 @@ def c_ineq(x_mat):
         y_max - np.max(y), # max height
         theta[0] - theta_0_min, # min initial angle
         theta_0_max - theta[0], # max initial angle
-        v_tangential_max - (v[0] + np.abs(w * 2 * np.pi * d / 2)), # limit linear velocity and spin based on max flywheel speed
+        v_tangential_max - (v[0] + np.abs(w * 2 * np.pi * d_ball / 2)), # limit linear velocity and spin based on max flywheel speed
     ]
 
 # run optimization
@@ -103,8 +94,7 @@ print("theta_0: ", np.rad2deg(theta[0]))
 print("v_f: ", v[-1] * METERS_TO_FEET)
 print("theta_f: ", np.rad2deg(theta[-1]))
 print("w: ", w)
-print("top motor rpm: ", (v[0] + w * 2 * np.pi * d / 2) / (d_wheel / 2) * G * 60 / (2 * np.pi))
-print("bottom motor rpm: ", (v[0] - w * 2 * np.pi * d / 2) / (d_wheel / 2) * G * 60 / (2 * np.pi))
+print("top motor rpm:  {}\nbottom motor rpm:  {}".format(*get_top_bottom(v[0], w, d_ball, d_wheel, G)))
 
 # resimulate with integration
 sim = Sim(ball, np.array([*x_i, v_x[0], v_y[0], w]))
